@@ -1,0 +1,48 @@
+rules_version = '2';
+// Regles de seguretat del Quadern de Martimàtiques.
+// Si canvies USUARI_PROFESSOR o DOMINI a js/config.js, canvia també el correu de sota.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function dins() { return request.auth != null; }
+    function prof() { return dins() && request.auth.token.email == 'professor@quadern-mates.app'; }
+
+    // Dades dels alumnes: cadascú veu la seva; el professor les gestiona
+    match /alumnes/{uid} {
+      allow read: if prof() || (dins() && request.auth.uid == uid);
+      allow write: if prof();
+    }
+    // Contrasenyes (per imprimir-les o canviar-les): només el professor
+    match /credencials/{uid} {
+      allow read, write: if prof();
+    }
+    // Enunciats (sense solucions)
+    match /fitxes/{id} {
+      allow read: if dins();
+      allow write: if prof();
+    }
+    // Solucions: només el professor, excepte les fitxes de pràctica
+    match /solucions/{id} {
+      allow read: if prof() || (dins() && resource.data.publica == true);
+      allow write: if prof();
+    }
+    match /entregues/{id} {
+      allow read: if dins();
+      allow write: if prof();
+    }
+    // Solucions d'una entrega: visibles quan s'acaba el termini
+    match /solucionsEntrega/{id} {
+      allow read: if prof() || (dins() && request.time > resource.data.visibleDes);
+      allow write: if prof();
+    }
+    // Respostes: l'alumne escriu les seves fins al termini i fins que les envia
+    match /respostes/{rid} {
+      allow read: if prof() || (dins() && (resource == null || resource.data.uid == request.auth.uid));
+      allow create, update: if prof() || (dins()
+        && request.resource.data.uid == request.auth.uid
+        && rid == request.resource.data.entregaId + '_' + request.auth.uid
+        && request.time < get(/databases/$(database)/documents/entregues/$(request.resource.data.entregaId)).data.limit
+        && (resource == null || resource.data.get('enviada', false) != true));
+      allow delete: if prof();
+    }
+  }
+}
